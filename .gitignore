@@ -1,1 +1,68 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
 .DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Testing
+.pytest_cache/
+.coverage
+
+# Project-specific data (too large for git)
+data/
+*.fna
+*.fasta
+*.fastq
+*.gz
+*.tar
+*.zip
+
+# Results and outputs
+results/
+outputs/
+images/
+*.png
+*.jpg
+*.pdf
+
+# Large data files
+*.csv
+*.json
+!examples/*.csv
+!examples/*.json
+
+# Jellyfish intermediate files
+*.jf
+*.kmr
+
+# SLURM logs
+slurm-*.out
+*.log
+
+# Temporary
+tmp/
+temp/
+*.tmp

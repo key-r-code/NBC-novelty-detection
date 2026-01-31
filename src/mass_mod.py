@@ -1,128 +1,145 @@
-import os
+"""
+Process NBC++ classification results.
+
+Adds taxonomic annotations and Known/Unknown labels based on training set membership.
+
+Usage:
+    python mass_mod.py
+"""
+
 import json
-import polars as pl
+import os
 from multiprocessing import Pool
+from pathlib import Path
 
-def get_training_list(taxa, trial):
+import polars as pl
 
-    file_path = f'/ifs/groups/rosenMRIGrp/kr3288/extended/training_lists/{taxa}_{trial}.txt'
-    with open(file_path, 'r') as t:
-        lines = t.readlines()
-        return [line.strip('\n')[1:] for line in lines]
-    
-def create_trial_map(taxa):
-
-    TRIAL_MAP = {
-        '1': [],
-        '2': [], 
-        '3': [],
-        '4': [],
-        '5': []
-    }
-
-    for trial in ['trial_1', 'trial_2', 'trial_3', 'trial_4', 'trial_5']:
-        TRIAL_MAP[trial[-1:]] = get_training_list(taxa, trial)
-
-    return TRIAL_MAP
+from config import (
+    KMER_LENGTHS,
+    NEW_LINEAGE_CSV,
+    SPECIES_MAPPING_JSON,
+    TAXA_LEVELS,
+    TRIALS,
+    ensure_dir,
+    get_classification_results_dir,
+    get_modified_results_dir,
+    get_training_list_path,
+)
 
 
-def create_lookup(taxa):
+def get_training_list(taxa: str, trial: str) -> list:
+    file_path = get_training_list_path(taxa, trial)
+    if not file_path.exists():
+        print(f"Warning: Training list not found: {file_path}")
+        return []
+    with open(file_path, 'r') as f:
+        return [line.strip('\n')[1:] for line in f.readlines()]
+
+
+def create_trial_map(taxa: str) -> dict:
+    trial_map = {str(i): [] for i in range(1, 6)}
+    for trial in TRIALS:
+        trial_num = trial.split('_')[1]
+        trial_map[trial_num] = get_training_list(taxa, trial)
+    return trial_map
+
+
+def create_lookup(taxa: str) -> pl.DataFrame:
+    if not NEW_LINEAGE_CSV.exists():
+        raise FileNotFoundError(f"Lineage CSV not found: {NEW_LINEAGE_CSV}")
     return (
-        pl.read_csv('/ifs/groups/rosenMRIGrp/kr3288/extended/new_extended_lineage.csv')
+        pl.read_csv(str(NEW_LINEAGE_CSV))
         .fill_null('')
-        .with_columns(
-            pl.col(pl.Utf8).str.strip_chars(),
-            pl.col('Species_ID').cast(str)
-        )
+        .with_columns(pl.col(pl.Utf8).str.strip_chars(), pl.col('Species_ID').cast(str))
         .select(['Species_ID', taxa])
         .unique()
     )
 
 
-def output_modifier(csv_file_path):
+def load_species_mapping() -> dict:
+    if not SPECIES_MAPPING_JSON.exists():
+        raise FileNotFoundError(f"Species mapping not found: {SPECIES_MAPPING_JSON}")
+    with open(SPECIES_MAPPING_JSON, 'r') as f:
+        dict_ = json.load(f)
+    return {value: key for key, values in dict_.items() for value in values}
 
-    taxa = csv_file_path.split('/')[-1].split("_")[2]
-    TRIAL_MAP = create_trial_map(taxa)
-    trial_number = csv_file_path.split("/")[-1].split("_")[1]
+
+def output_modifier(csv_file_path: str) -> None:
+    csv_path = Path(csv_file_path)
+    if not csv_path.exists():
+        print(f"Warning: File not found: {csv_file_path}")
+        return
+    
+    filename_parts = csv_path.name.split("_")
+    taxa = filename_parts[2] if len(filename_parts) > 2 else "unknown"
+    trial_number = filename_parts[1] if len(filename_parts) > 1 else "1"
+    
+    trial_map = create_trial_map(taxa)
     lookup = create_lookup(taxa.capitalize())
+    species_mapping = load_species_mapping()
 
-    with open('/ifs/groups/rosenMRIGrp/kr3288/eeee.json', 'r') as j:
-        dict_ = json.load(j)
-    l = {value: key for key, values in dict_.items() for value in values}
-
-    mod_path = f"/ifs/groups/rosenMRIGrp/kr3288/extended/{taxa}_modified"
-    os.makedirs(mod_path, exist_ok=True)
+    mod_path = get_modified_results_dir(taxa)
+    ensure_dir(mod_path)
 
     df = (
-        pl.read_csv(
-            csv_file_path,
-            has_header=False,
-            new_columns=['NCBI RefSeq', 'Predicted Species_ID', 'Logarithmic probability']
-        )
+        pl.read_csv(csv_file_path, has_header=False,
+                    new_columns=['NCBI RefSeq', 'Predicted Species_ID', 'Logarithmic probability'])
         .filter(~pl.col('NCBI RefSeq').cast(str).str.contains(r'^\d+$'))
-        .with_columns([
-            pl.col('Predicted Species_ID').cast(str)
-        ])
+        .with_columns(pl.col('Predicted Species_ID').cast(str))
     )
 
     df = (
-        df.join(
-            lookup.select(['Species_ID', pl.col(taxa.capitalize())]),
-            left_on='Predicted Species_ID',
-            right_on='Species_ID',
-            how='left'
-        )
+        df.join(lookup.select(['Species_ID', pl.col(taxa.capitalize())]),
+                left_on='Predicted Species_ID', right_on='Species_ID', how='left')
         .rename({taxa.capitalize(): f'Predicted {taxa.capitalize()}'})
     )
 
     df = df.with_columns(
-        pl.col('NCBI RefSeq')
-        .replace_strict(l, default='')
-        .str.strip_chars()
-        .alias('Actual Species')
+        pl.col('NCBI RefSeq').replace_strict(species_mapping, default='').str.strip_chars().alias('Actual Species')
     )
 
     df = (
-        df.join(
-            lookup.select(['Species_ID', pl.col(taxa.capitalize())]),
-            left_on='Actual Species',
-            right_on='Species_ID',
-            how='left'
-        )
+        df.join(lookup.select(['Species_ID', pl.col(taxa.capitalize())]),
+                left_on='Actual Species', right_on='Species_ID', how='left')
         .rename({taxa.capitalize(): f'Actual {taxa.capitalize()}'})
     )
 
     df = (
-        df.with_columns([
-            pl.col('NCBI RefSeq')
-                .str.split('_')
-                .list.slice(0, 2)
-                .list.join('_')
-                .alias('NCBI RefSeq striped')
-        ])
-        .with_columns([
+        df.with_columns(
+            pl.col('NCBI RefSeq').str.split('_').list.slice(0, 2).list.join('_').alias('NCBI RefSeq striped')
+        )
+        .with_columns(
             pl.col('NCBI RefSeq striped')
-                .replace_strict({k: 'Known' for k in TRIAL_MAP.get(trial_number, '')}, default='Unknown')
-                .alias('Known/Unknown')
-        ])
+            .replace_strict({k: 'Known' for k in trial_map.get(trial_number, [])}, default='Unknown')
+            .alias('Known/Unknown')
+        )
     )
 
-    output_filename = os.path.basename(csv_file_path)
-    df.write_csv(f'{mod_path}/mod_{output_filename}')
+    output_path = mod_path / f'mod_{csv_path.name}'
+    df.write_csv(str(output_path))
+    print(f"Processed: {output_path}")
+
+
+def get_all_csv_paths() -> list:
+    paths = []
+    for trial in TRIALS:
+        for kmer in KMER_LENGTHS:
+            for taxa in TAXA_LEVELS:
+                csv_path = get_classification_results_dir(taxa, kmer) / f'{trial}_{taxa}_{kmer}mers.csv'
+                paths.append(str(csv_path))
+    return paths
+
+
+def main():
+    paths = get_all_csv_paths()
+    print(f"Processing {len(paths)} classification result files...")
+    
+    num_threads = int(os.environ.get('SLURM_NTASKS', os.cpu_count() or 4))
+    with Pool(processes=num_threads) as pool:
+        pool.map(output_modifier, paths)
+    
+    print("Processing complete.")
 
 
 if __name__ == "__main__":
-
-    all_csv_paths = []
-
-    for trial in ['trial_1', 'trial_2', 'trial_3', 'trial_4', 'trial_5']:
-        for kmer in ['3', '6', '9', '12', '15']:
-            for taxa in ['phylum', 'class', 'order', 'family']:
-                path = os.path.join(f'/ifs/groups/rosenMRIGrp/kr3288/extended/{taxa}_testing/{kmer}-mers/classification_results', f'{trial}_{taxa}_{kmer}mers.csv')
-                all_csv_paths.append(path)
-
-
-    num_threads = int(os.environ.get('SLURM_NTASKS', 48))
-    
-    with Pool(processes=num_threads) as pool:
-        pool.map(output_modifier, all_csv_paths)
+    main()
