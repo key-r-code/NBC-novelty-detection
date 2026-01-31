@@ -5,7 +5,7 @@
 
 This repository contains the code and analysis pipeline for evaluating the Naïve Bayes Classifier++ (NBC++) as an out-of-distribution (OOD) detector for novel taxa in metagenomic classification.
 
-**Paper:** [Naïve Bayes Classifier++ as an out-of-distribution detector of novel taxa](#) [preprint](https://www.biorxiv.org/content/10.1101/2025.10.18.683227v2)
+**Paper:** Naïve Bayes Classifier++ as an out-of-distribution detector of novel taxa [preprint](https://www.biorxiv.org/content/10.1101/2025.10.18.683227v2)
 
 ## Repository Structure
 
