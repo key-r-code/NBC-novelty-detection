@@ -1,6 +1,5 @@
 # NBC++ for Out-of-Distribution Detection of Novel Taxa
 
-[![DOI](https://img.shields.io/badge/DOI-Coming%20Soon-blue)]()
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 This repository contains the code and analysis pipeline for evaluating the Naïve Bayes Classifier++ (NBC++) as an out-of-distribution (OOD) detector for novel taxa in metagenomic classification.
